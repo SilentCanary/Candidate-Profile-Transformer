@@ -1,126 +1,355 @@
 # Candidate Profile Transformer
 
-A deterministic, explainable pipeline that turns a recruiter CSV + resume files
-into one canonical candidate profile per person, with confidence scores and
-provenance, reshaped at request time by a runtime projection config.
+A deterministic and explainable pipeline that converts recruiter CSV data and resume files into one canonical candidate profile per candidate.
 
-Sources implemented (one per required group, per the brief):
-- **Structured**: recruiter CSV (`name, email, phone, current_company, title, job_role, resume_text`)
-- **Unstructured**: resume file (PDF / DOCX / TXT)
+The pipeline extracts, normalizes, matches, merges, and projects candidate data while keeping confidence scores, provenance, and safe fallback behavior for uncertain values.
 
-## How to run
+## Sources Implemented
+
+This project handles one source from each required group:
+
+- **Structured source:** Recruiter CSV  
+  Fields such as `name`, `email`, `phone`, `current_company`, `title`, `job_role`, `resume_text`
+
+- **Unstructured source:** Resume file  
+  Supported formats: `PDF`, `DOCX`, `TXT`
+
+---
+
+## How to Run
+
+From the project root:
 
 ```bash
 cd cpt
-pip install pandas python-docx pdfplumber   # pandas already required; docx/pdf only needed for those file types
+pip install pandas python-docx pdfplumber
+```
 
-# Full default schema, all resumes in a folder, matched against the CSV:
+### Default canonical output
+
+```bash
 python -m pipeline.cli --csv "sample_data\recruiters_pipeline_ready.csv" --resumes "sample_resumes\daisuke_mori.pdf" --out -
+```
 
-# Single resume, custom runtime config (field select/rename/normalize), to stdout:
+### Custom runtime config output
+
+```bash
 python -m pipeline.cli --csv "sample_data\recruiters_pipeline_ready.csv" --resumes "sample_resumes\daisuke_mori.pdf" --config "sample_data\slim_config.json" --out -
+```
 
+### Edge-case unmatched resume
 
-# Drop resumes that couldn't be matched to any CSV row:
+```bash
 python -m pipeline.cli --csv "sample_data\recruiters_pipeline_ready.csv" --resumes "sample_resumes\ananya_iyer.txt" --out -
 ```
 
-`sample_data/recruiters_pipeline_ready.csv` and `sample_resumes/*.txt` are included so the
-whole thing runs end to end with no other inputs. Swap in your real CSV and
-resume files (PDF/DOCX/TXT all supported) -- same commands.
+### Write output to file
 
-## Pipeline stages (`pipeline/`)
+```bash
+python -m pipeline.cli --csv "sample_data\recruiters_pipeline_ready.csv" --resumes "sample_resumes\daisuke_mori.pdf" --out "output.json"
+```
 
-1. **Ingestion** (`ingestion.py`) -- CSV read via pandas, one row -> one raw
-   record. Resume converted to plain text (pdfplumber / python-docx / direct
-   read) then heuristically parsed into name/email/phone/links/skills/
-   education/certs/experience.
-2. **Normalization** (`normalization.py`, `normalize_records.py`,
-   `skills_alias.py`, `geo.py`) -- applied to both sources **independently**:
-   name title-casing, email lowercase+validate, phone -> E.164-style,
-   dates -> `YYYY-MM`, skill alias canonicalization, country -> ISO-3166 alpha-2
-   (for both CSV `city/region/country` columns, if present, and resume-extracted
-   location lines).
-3. **Candidate matching** (`matching.py`) -- finds the CSV row for a resume:
-   exact email -> exact phone -> unique name match -> fuzzy name +
-   resume-similarity (skill/company/role overlap) for same-name disambiguation.
-   Below the fuzzy threshold (0.6) the record is left **unmatched** rather than
-   guessed at.
-4. **Conflict resolution** (`conflict.py`) -- every value becomes an evidence
-   object `{field, value, source, method, confidence, provenance}`.
-   - Multi-value fields (emails, phones, skills, experience, certifications)
-     are accumulated, deduplicated, and sorted by confidence.
-   - Scalar fields (full_name, current_company, title, headline,
-     years_experience) pick one winner; the rejected value is kept in
-     `provenance`, never discarded silently.
-   - `current_company`: CSV always wins on conflict; the resume's older
-     company is preserved as an `experience` entry instead of being dropped.
-   - `title`: more specific value wins when confidence is close
-     ("Backend Developer" > "Developer").
-   - Skills found in **both** CSV resume-text and the uploaded resume get
-     high confidence (0.9); single-source skills get medium (0.55); repeated
-     mentions from one source don't inflate confidence (no keyword-stuffing).
-   - `years_experience`: explicit statement > computed from clear start/end
-     dates > `null` (never guessed from partial dates).
-   - Education: resume preferred, CSV only as fallback; no degree is inferred
-     without explicit evidence.
-   - Sensitive attributes (age/gender/race/...) are split out into
-     `_protected_metadata` at ingestion and never reach matching, scoring, or
-     the canonical profile / default output.
-   - Every profile gets a top-level `confidence` (unweighted average of every
-     field/item with real evidence behind it; fields with no source at all
-     are skipped rather than dragging the average toward 0, so "no data"
-     doesn't read the same as "low-confidence data"). Exposed by the default
-     config as `overall_confidence`.
-5. **Projection** (`projection.py`) -- the only place the runtime config is
-   applied. It selects fields, renames via `from` paths (including
-   `array[0]` and `array[].field` wildcards), applies per-field
-   normalization, toggles confidence/provenance visibility, and resolves
-   missing values as `null` / `omit` / `error`. The canonical profile itself
-   never changes shape -- only the projection does, so reshaping output needs
-   **zero code changes**, just a new config file (see
-   `sample_data/slim_config.json` for an example matching the brief's spec).
-6. **Orchestrator / CLI** (`orchestrator.py`, `cli.py`) -- wires the stages
-   together per resume, isolates per-record failures (one bad file produces
-   an error entry in the output, it does not crash the batch), and writes
-   JSON to stdout or a file.
+---
 
-## Known gaps (honest list)
+## Example Default Output
 
-- Matching is O(resumes x csv_rows); fine at hundreds/thousands of rows, not
-  load-tested at larger scale.
-- `candidate_id` is a deterministic hash of the best available identity
-  anchor (email > phone > name > file path), not a random UUID -- this
-  matters because the brief requires "same inputs produce the same output."
-- `location` and `links.portfolio` are populated on a best-effort basis:
-  - CSV: only if the CSV has `city`/`region`/`country` (or `state`) columns.
-  - Resume: an explicit `Location:` / `Based in:` line anywhere, or a bare
-    `City, Country` line in the header. No geocoding/inference beyond that.
-  - `portfolio`: any non-LinkedIn/GitHub URL containing "portfolio",
-    "behance", "dribbble", or a `.me`/`.dev` path; otherwise lands in
-    `links.other[]`.
-  When the CSV and resume disagree on city, the CSV (recruiter-maintained)
-  wins, same rule as `current_company`.
+For `daisuke_mori.pdf`, the pipeline finds a matching CSV row using exact normalized email.
 
-## Known substitutions (sandbox had no network/pip access)
+```json
+{
+  "candidate_id": "cd90e56b-5171-7c9c-1355-751f8dd506a6",
+  "full_name": {
+    "value": "Daisuke Mori",
+    "confidence": 0.85
+  },
+  "emails": [
+    "daisuke.mori.223@yahoo.com"
+  ],
+  "phones": [
+    "+918573688180"
+  ],
+  "location": {
+    "value": {
+      "city": "Tokyo",
+      "region": "Tokyo",
+      "country": "JP"
+    },
+    "confidence": 0.8
+  },
+  "skills": [
+    {
+      "name": "Product Roadmap",
+      "confidence": 0.9,
+      "sources": ["csv", "resume"]
+    }
+  ],
+  "overall_confidence": 0.737,
+  "_pipeline_meta": {
+    "source_resume": "daisuke_mori.pdf",
+    "matched": true,
+    "match_method": "email",
+    "match_confidence": 0.97,
+    "match_reason": "exact normalized email match"
+  }
+}
+```
 
-- Phone normalization uses a regex-based E.164 approximation instead of the
-  `phonenumbers` library (default region inferred as `+91`). Swap
-  `normalization.normalize_phone` for `phonenumbers.parse(...)` +
-  `format_number(..., PhoneNumberFormat.E164)` in production.
-- Fuzzy name matching uses stdlib `difflib.SequenceMatcher` instead of
-  `rapidfuzz`. Swap `matching._name_similarity` for
-  `rapidfuzz.fuzz.token_sort_ratio(...) / 100` for production -- the rest of
-  the pipeline only depends on getting a 0..1 similarity score back.
-- Resume parsing (`ingestion.parse_resume`) is regex/heuristic-based, not
-  ML/NLP-based (the design doc explicitly lists "ML-based skill extraction"
-  and "NLP co-ref resolution" as deliberately out of scope for Phase 1).
+---
 
-## What's deliberately not built (matches "Deliberate Omissions" in the design)
+## Example Custom Config Output
 
-GitHub/LinkedIn live API fetch, ML-based skill extraction, NLP co-reference
-resolution, multi-language name normalization, ATS JSON ingestion (only one
-structured + one unstructured source was required; adding a second
-structured source is a matter of writing another `ingestion.load_x()` +
-`normalize_x_record()` pair and feeding its output into the same
-`matching`/`conflict`/`projection` stages -- no other changes needed).
+With `sample_data/slim_config.json`, the same canonical profile is projected into a smaller schema.
+
+```json
+{
+  "full_name": "Daisuke Mori",
+  "primary_email": "daisuke.mori.223@yahoo.com",
+  "phone": "+918573688180",
+  "skills": [
+    "Cross-Functional Collaboration",
+    "Customer Feedback",
+    "Product Roadmap",
+    "Project Management",
+    "SQL"
+  ]
+}
+```
+
+The same internal canonical profile is used. Only the final output shape changes.
+
+---
+
+## Edge Case Example
+
+For `ananya_iyer.txt`, the resume is parsed but not merged because the fuzzy name match is below the threshold.
+
+```json
+{
+  "_pipeline_meta": {
+    "source_resume": "ananya_iyer.txt",
+    "matched": false,
+    "match_method": "name_fuzzy_below_threshold",
+    "match_confidence": 0.583,
+    "match_reason": "best fuzzy name sim=0.58 < 0.6"
+  }
+}
+```
+
+This is intentional. A weak match is left unmatched rather than merged incorrectly.
+
+---
+
+## Architecture
+
+```text
+                     INPUT SOURCES
+                           │
+          ┌────────────────┴────────────────┐
+          │                                 │
+   Recruiter CSV                     Resume File
+ structured source              PDF / DOCX / TXT
+          │                                 │
+          └────────────────┬────────────────┘
+                           │
+                 Stage 1 - Ingestion
+                           │
+                 Stage 2 - Extraction
+                           │
+                 Stage 3 - Normalization
+                           │
+                 Stage 4 - Candidate Matching
+                           │
+                 Stage 5 - Conflict Resolution
+                           │
+                 Stage 6 - Canonical Profile
+                           │
+                 Stage 7 - Runtime Projection
+                           │
+                 Stage 8 - JSON Output
+                           │
+                 Final Candidate Profile
+```
+
+---
+
+## Project Structure
+
+```text
+.
+├── README.md
+│
+├── pipeline/
+│   ├── __init__.py
+│   ├── cli.py
+│   ├── orchestrator.py
+│   ├── ingestion.py
+│   ├── normalization.py
+│   ├── normalize_records.py
+│   ├── matching.py
+│   ├── conflict.py
+│   ├── projection.py
+│   ├── geo.py
+│   └── skills_alias.py
+│
+├── sample_data/
+│   ├── recruiters.csv
+│   ├── recruiters_pipeline_ready.csv
+│   └── slim_config.json
+│
+└── sample_resumes/
+    ├── daisuke_mori.pdf
+    ├── daisuke_mori.txt
+    ├── ananya_iyer.txt
+    ├── priya_sharma.txt
+    ├── rohit_kumar_analyst.txt
+    └── vikram_rao.txt
+```
+
+
+---
+
+## Pipeline Stages
+
+### 1. Ingestion
+
+Implemented in `ingestion.py`.
+
+- Reads recruiter CSV using pandas.
+- Converts resume files into plain text.
+- Supports PDF, DOCX, and TXT resumes.
+- Extracts fields such as name, email, phone, links, skills, experience, education, and certifications.
+
+### 2. Normalization
+
+Implemented in:
+
+```text
+normalization.py
+normalize_records.py
+skills_alias.py
+geo.py
+```
+
+Normalization is applied independently to CSV records and resume records.
+
+Examples:
+
+```text
+Emails      → lowercase + validation
+Phones      → E.164-style format
+Dates       → YYYY-MM
+Country     → ISO-3166 alpha-2
+Skills      → canonical skill names
+Names       → cleaned and title-cased
+```
+
+Example:
+
+```text
+Japan        → JP
+Mar 2021     → 2021-03
+85736 88180  → +918573688180
+```
+
+### 3. Candidate Matching
+
+Implemented in `matching.py`.
+
+The matcher links a resume to the correct CSV row using:
+
+```text
+1. Exact normalized email
+2. Exact normalized phone
+3. Unique exact name
+4. Fuzzy name + resume similarity
+5. Below threshold → leave unmatched
+```
+
+The fuzzy threshold is `0.6`. If the score is lower, the pipeline does not merge the record.
+
+### 4. Conflict Resolution
+
+Implemented in `conflict.py`.
+
+The pipeline resolves conflicting values using field-specific rules:
+
+- Email and phone are strong identity signals.
+- CSV is preferred for current title/current company.
+- Resume is preferred for experience, education, and certifications.
+- Skills are merged, deduplicated, and confidence-scored.
+- Unknown values remain `null` instead of being guessed.
+- Rejected scalar values are kept in provenance where applicable.
+
+Skill confidence example:
+
+```text
+Skill in both CSV + resume → high confidence
+Skill in one source only   → medium confidence
+Repeated mentions          → no confidence inflation
+```
+
+### 5. Projection Layer
+
+Implemented in `projection.py`.
+
+The runtime config reshapes the output without changing the internal canonical profile.
+
+It supports:
+
+- selecting fields
+- renaming fields using `from`
+- paths like `emails[0]`
+- array paths like `skills[].name`
+- toggling confidence/provenance
+- missing value behavior: `null`, `omit`, or `error`
+
+Example config file:
+
+```text
+sample_data/slim_config.json
+```
+
+
+## Design Decisions
+
+This implementation prioritizes:
+
+- deterministic output
+- explainable matching
+- conservative conflict resolution
+- confidence scoring
+- provenance tracking
+- runtime configurable output
+- no unsafe guessing for missing fields
+
+---
+
+## Known Gaps
+
+- Matching is currently `O(resumes × csv_rows)`.
+- Phone normalization uses an E.164-style regex approximation instead of the full `phonenumbers` library.
+- Fuzzy name matching uses Python standard library similarity instead of RapidFuzz.
+- Resume parsing is heuristic/regex-based, not ML-based.
+- Scanned PDF OCR is not implemented.
+- GitHub/LinkedIn live fetching and ATS JSON ingestion are deliberately left out for this phase.
+
+---
+
+## Future Improvements
+
+- OCR for scanned PDFs
+- ATS JSON ingestion
+- GitHub / LinkedIn profile ingestion
+- LLM-assisted resume extraction
+- ML-based skill extraction
+- Better semantic skill canonicalization
+- Configurable source weighting
+- Pydantic / JSON Schema validation
+- Unit and end-to-end tests
+
+---
+
+## Author
+
+Advitiya Prakash  
+
