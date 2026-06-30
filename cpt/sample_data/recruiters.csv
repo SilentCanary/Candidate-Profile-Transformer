@@ -1,0 +1,5 @@
+name,email,phone,current_company,title,job_role,resume_text,city,region,country
+Priya Sharma,priya.sharma@gmail.com,9876543210,Acme Corp,Backend Developer,Backend Engineering,"Priya has worked with Python, Django, PostgreSQL and AWS for 4 years.",Bengaluru,Karnataka,India
+Rohit Kumar,rohit.k@outlook.com,+91-9123456780,DataWorks,Developer,Software Engineering,"Rohit knows Java and SQL, worked on REST APIs.",Pune,Maharashtra,India
+Rohit Kumar,rohitkumar99@yahoo.com,9988776655,CloudNine,Data Analyst,Analytics,"Rohit is a data analyst skilled in SQL, Python and Tableau.",Hyderabad,Telangana,India
+Ananya Iyer,ananya.iyer@techmail.com,9000011122,PixelWorks,Frontend Developer,Frontend Engineering,"Ananya builds UIs with React and TypeScript.",Chennai,Tamil Nadu,India

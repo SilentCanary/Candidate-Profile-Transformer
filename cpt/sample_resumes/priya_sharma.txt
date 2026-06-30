@@ -1,0 +1,16 @@
+Priya Sharma
+priya.sharma@gmail.com | +91 9876543210
+Location: Bengaluru, Karnataka, India
+linkedin.com/in/priyasharma | github.com/priyasharma
+
+Skills: Python, Django, PostgreSQL, AWS, Docker, Git
+
+Experience:
+Backend Developer @ Acme Corp (Jan 2022 - Present)
+Software Engineer @ StartUpX (Jun 2019 - Dec 2021)
+
+Education:
+B.Tech in Computer Science, ABC Institute of Technology (2019)
+
+Certifications:
+AWS Certified Solutions Architect

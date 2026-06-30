@@ -1,0 +1,12 @@
+Ananya Iyer
+ananya.iyer.dev@protonmail.com | 9000011122
+linkedin.com/in/ananyaiyer | github.com/ananyaiyer-dev
+
+Skills: React, TypeScript, JavaScript, CSS, HTML, Git
+
+Experience:
+Frontend Developer @ PixelWorks (Feb 2023 - Present)
+UI Engineer @ WebStudio (Jan 2021 - Jan 2023)
+
+Education:
+B.Tech in Information Technology, XYZ College (2020)

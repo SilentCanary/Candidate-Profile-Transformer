@@ -1,0 +1,10 @@
+Vikram Rao
+vikram.rao@example.com | 9111122233
+
+Skills: Go, Kubernetes, Docker
+
+Experience:
+Site Reliability Engineer @ ScaleUp Systems (Apr 2020 - Present)
+
+Education:
+M.Tech in Computer Science, National Institute of Technology (2017)
